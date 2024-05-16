@@ -411,6 +411,7 @@ class PreResolvedWiringNodeWrapper(BaseWiringNodeClass):
 
         raise AttributeError(f"Attribute {item} not found on {self.underlying_node}")
 
+
     def __repr__(self):
         sig = self.underlying_node.signature
         args = (f'{arg}: {str(sig.input_types[arg])}'
@@ -424,6 +425,7 @@ class PreResolvedWiringNodeWrapper(BaseWiringNodeClass):
 
     def stop(self, fn: Callable):
         self.underlying_node.stop(fn)
+
 
 
 class OverloadedWiringNodeHelper:
