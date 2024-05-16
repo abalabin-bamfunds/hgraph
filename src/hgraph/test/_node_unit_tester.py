@@ -100,7 +100,6 @@ def eval_node(node, *args, resolution_dict: [str, Any] = None,
         else:
             out = [result[1] for result in results]
         return out
-      
 
 
 def _time_iter(start, end, delta):
