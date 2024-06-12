@@ -5,8 +5,8 @@ from frozendict import frozendict
 
 from hgraph import reference_service, TSD, TS, service_impl, graph, register_service, default_path, \
     subscription_service, TSS, map_, TSL, SIZE, request_reply_service, contains_, NUMBER, AUTO_RESOLVE, KEYABLE_SCALAR, \
-    SCALAR, SCALAR_1, TIME_SERIES_TYPE
-from hgraph.nodes import const, pass_through, sample, tsd_flip, null_sink, format_, debug_print
+    SCALAR, SCALAR_1, TIME_SERIES_TYPE, format_
+from hgraph.nodes import const, pass_through, sample, tsd_flip, null_sink, debug_print
 from hgraph._operators._control import merge
 from hgraph.nodes._conditional import route_ref
 from hgraph.test import eval_node
