@@ -111,7 +111,8 @@ class PythonTimeSeriesDictOutput(PythonTimeSeriesOutput, TimeSeriesDictOutput[K,
             raise KeyError(f"TSD[{self.__key_tp__}, {self.__value_tp__}] Key {k} does not exist")
         item = self._ts_values.pop(k)
         item.clear()
-        self._removed_items[k] = item
+        if not self.key_set.was_added(k):
+            self._removed_items[k] = item
         self._ts_values_to_keys.pop(id(item))
         self._ref_ts_feature.update(k)
         cast(TimeSeriesSetOutput, self.key_set).remove(k)
@@ -432,9 +433,6 @@ class PythonTimeSeriesDictInput(PythonBoundTimeSeriesInput, TimeSeriesDictInput[
         return frozendict(
             chain(((k, v.delta_value) for k, v in self.modified_items()), ((k, REMOVE) for k in self.removed_keys()))
         )
-
-    def __contains__(self, item):
-        return item in self._ts_values
 
     def key_from_value(self, value: V) -> K:
         return self._ts_values_to_keys[id(value)]
