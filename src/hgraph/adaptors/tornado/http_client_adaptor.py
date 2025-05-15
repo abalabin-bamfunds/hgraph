@@ -79,10 +79,10 @@ def http_client_adaptor_impl(
             raise HTTPError(401, "missing www-authenticate header")
 
         auth_header = auth_header.lower()
-        if "ntlm" in auth_header:
-            scheme = "NTLM"
-        elif "negotiate" in auth_header:
-            scheme = "Negotiate"
+        if 'negotiate' in auth_header:
+            scheme = 'Negotiate'
+        elif 'ntlm' in auth_header:
+            scheme = 'NTLM'
         else:
             raise HTTPError(401, "unhandled protocol")
 
@@ -123,11 +123,16 @@ def http_client_adaptor_impl(
             final = response2.headers.get("WWW-Authenticate")
             if final is not None:
                 try:
-                    challenge = [v[len(scheme) + 1 :] for val in final.split(",") if scheme in (v := val.strip())]
-                    if len(challenge) != 1:
-                        raise HTTPError(401, f"Did not get exactly one {scheme} challenge from server")
+                    challenge = [v[len(scheme) + 1:] for val in final.split(',') if scheme in (v := val.strip())]
+                    if len(challenge) > 1:
+                        raise HTTPError(
+                            401, f'Received more than one {scheme} challenge from server'
+                        )
 
-                    tokenbuf = win32security.PySecBufferType(pkg_info["MaxToken"], sspicon.SECBUFFER_TOKEN)
+                    tokenbuf = win32security.PySecBufferType(
+                        pkg_info['MaxToken'],
+                        sspicon.SECBUFFER_TOKEN
+                    )
                     tokenbuf.Buffer = base64.b64decode(challenge[0])
                     sec_buffer.append(tokenbuf)
                     err, auth = clientauth.authorize(sec_buffer)
@@ -148,8 +153,18 @@ def http_client_adaptor_impl(
             for val in response2.headers.get("WWW-Authenticate", "").split(",")
             if scheme in (v := val.strip())
         ]
-        if len(challenge) != 1:
-            raise HTTPError(401, f"Did not get exactly one {scheme} challenge from server")
+        if len(challenge) > 1:
+            raise HTTPError(
+                401, f'Received more than one {scheme} challenge from server'
+            )
+        elif len(challenge) == 0:
+            import re
+            base64_pattern = r'(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?'
+            matches = re.findall(base64_pattern, final)
+            if matches:
+                challenge = [matches[0]]
+            else:
+                raise HTTPError(401, f'Could not find any {scheme} challenge in WWW-Authenticate header: {final}')
 
         tokenbuf = win32security.PySecBufferType(pkg_info["MaxToken"], sspicon.SECBUFFER_TOKEN)
         tokenbuf.Buffer = base64.b64decode(challenge[0])
@@ -174,6 +189,7 @@ def http_client_adaptor_impl(
         if not auth_header:
             raise HTTPError(401, "missing www-authenticate header")
 
+        # Parse auth header to handle case when both NTLM and Negotiate are present
         auth_header = auth_header.lower()
         if "negotiate" in auth_header:
             scheme = "Negotiate"
