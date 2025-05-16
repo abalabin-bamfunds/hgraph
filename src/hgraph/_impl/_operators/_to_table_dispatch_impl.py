@@ -22,6 +22,7 @@ from hgraph._types import (
     HgREFTypeMetaData,
     STATE,
     HgDataFrameScalarTypeMetaData,
+    CompoundScalar
 )
 
 __all__ = ("PartialSchema", "extract_table_schema", "extract_table_schema_raw_type")
@@ -94,7 +95,7 @@ def _(tp: HgTSTypeMetaData) -> PartialSchema:
             to_table=lambda ts, schema=schema: (
                 schema.to_table(ts.delta_value) if ts.modified else (None,) * len(schema.keys)
             ),
-            to_table_snap=lambda ts, schema=schema: schema.to_table_snap(ts.value),
+            to_table_snap=lambda ts, schema=schema: schema.to_table_snap(ts.value) if ts.valid else (None,) * len(schema.keys),
             from_table=schema.from_table,
         )
     else:
@@ -153,37 +154,17 @@ def _(tp: HgREFTypeMetaData) -> PartialSchema:
         remove_partition_keys=schema.remove_partition_keys,
         to_table=lambda v, schema=schema: schema.to_table(
             v.value.output
-            if v.value.output is not None
-            else STATE(**{k: v.output for k, v in zip(schema.keys, v.value.items)})
+            if v.value.has_output
+            else STATE(**{k: i.output for k, i in zip(schema.tp.bundle_schema_tp.meta_data_schema.keys(), v.value.items)})
+            if v.value.is_valid
+            else (None,) * len(schema.keys)
         ),
         to_table_snap=lambda v, schema=schema: schema.to_table_snap(
             v.value.output
-            if v.value.output is not None
-            else STATE(**{k: v.output for k, v in zip(schema.keys, v.value.items)})
-        ),
-        from_table=lambda iter: next(iter),
-    )
-
-
-@extract_table_schema.register(HgREFTypeMetaData)
-def _(tp: HgREFTypeMetaData) -> PartialSchema:
-    item_tp = tp.value_tp
-    schema = extract_table_schema(item_tp)
-    return PartialSchema(
-        tp.py_type,
-        keys=schema.keys,
-        types=schema.types,
-        partition_keys=schema.partition_keys,
-        remove_partition_keys=schema.remove_partition_keys,
-        to_table=lambda v, schema=schema: schema.to_table(
-            v.value.output
-            if v.value.output is not None
-            else STATE(**{k: v.output for k, v in zip(schema.keys, v.value.items)})
-        ),
-        to_table_snap=lambda v, schema=schema: schema.to_table_snap(
-            v.value.output
-            if v.value.output is not None
-            else STATE(**{k: v.output for k, v in zip(schema.keys, v.value.items)})
+            if v.value.has_output
+            else STATE(**{k: i.output for k, i in zip(schema.tp.bundle_schema_tp.meta_data_schema.keys(), v.value.items)})
+            if v.value.is_valid
+            else (None,) * len(schema.keys)
         ),
         from_table=lambda iter: next(iter),
     )
@@ -236,72 +217,91 @@ class PartitionKeyCounter:
 @extract_table_schema.register(HgTSDTypeMetaData)
 def _(tp: HgTSDTypeMetaData) -> PartialSchema:
     with PartitionKeyCounter():
-        key_name = f"__key_{PartitionKeyCounter.count}__"
-        removed_name = f"__key_{PartitionKeyCounter.count}_removed__"
         key_type = tp.key_tp.py_type
-        if key_type not in (bool, int, str, date, datetime, time, timedelta):
+        if key_type in (bool, int, str, date, datetime, time, timedelta):
+            key_names = f"__key_{PartitionKeyCounter.count}__",
+            key_schema = PartialSchema(
+                tp,
+                keys=('',),
+                types=(key_type,),
+                partition_keys=tuple(),
+                remove_partition_keys=tuple(),
+                to_table=lambda v, k=key_names[0]: (v,),
+                to_table_snap=lambda v, k=key_names[0]: (v,),
+                from_table=lambda it: next(it),
+            )
+        elif issubclass(key_type, CompoundScalar):
+            key_schema = extract_table_schema(HgTypeMetaData.parse_type(key_type))
+            key_names = tuple(f"__key_{PartitionKeyCounter.count}_{k}__" for k in key_schema.keys)
+        else:
             raise ValueError(
                 f"Cannot extract table schema from '{tp}' as {key_type} is not supported as a keyable column"
             )
+            
+
+        removed_name = f"__key_{PartitionKeyCounter.count}_removed__"
         schema = extract_table_schema(tp.value_tp)
     return PartialSchema(
         tp,
         keys=(
             removed_name,
-            key_name,
         )
+        + key_names
         + schema.keys,
         types=(
             bool,
-            key_type,
         )
+        + key_schema.types
         + schema.types,
-        partition_keys=(key_name,) + schema.partition_keys,
+        partition_keys=key_names + schema.partition_keys,
         remove_partition_keys=(removed_name,) + schema.remove_partition_keys,
-        to_table=lambda tsd, k=key_name, schema=schema: _tsd_to_table(tsd, schema),
-        to_table_snap=lambda tsd, k=key_name, schema=schema: _tsd_to_table(tsd, schema, True),
-        from_table=lambda it, schema=schema: _tsd_from_table(it, schema),
+        to_table=lambda tsd, k=key_names, key_schema=key_schema, schema=schema: _tsd_to_table(tsd, key_schema, schema),
+        to_table_snap=lambda tsd, k=key_names, key_schema=key_schema, schema=schema: _tsd_to_table(tsd, key_schema, schema, True),
+        from_table=lambda it, key_schema=key_schema, schema=schema: _tsd_from_table(it, key_schema, schema),
     )
 
 
-def _tsd_to_table(tsd: TSD[K, V], schema: PartialSchema, snap=False) -> TABLE:
+def _tsd_to_table(tsd: TSD[K, V], key_schema, schema: PartialSchema, snap=False) -> TABLE:
     if schema.partition_keys:
         # If there are partial keys in the value, then we will potentially get multiple rows
         out = []
         for k, v in tsd.modified_items() if not snap else tsd.valid_items():
+            keys = key_schema.to_table(k)
             for row in schema.to_table(v) if not snap else schema.to_table_snap(v):
                 out.append(
                     (
                         False,
-                        k,
                     )
+                    + keys
                     + row
                 )
         if not snap:
             for k in tsd.removed_keys():
-                out.append((True, k) + (None,) * len(schema.keys))
+                keys = key_schema.to_table(k)
+                out.append((True,) + keys + (None,) * len(schema.keys))
         return tuple(out)
     else:
         return tuple(
             (
                 (
                     False,
-                    k,
                 )
+                + key_schema.to_table(k)
                 + (schema.to_table(v) if not snap else schema.to_table_snap(v))
             )
             for k, v in (tsd.modified_items() if not snap else tsd.valid_items())
-        ) + tuple(((True, k) + (None,) * len(schema.keys)) for k in (tsd.removed_keys() if not snap else ()))
+        ) + tuple(((True,) + key_schema.to_table(k) + (None,) * len(schema.keys)) for k in (tsd.removed_keys() if not snap else ()))
 
 
-def _tsd_from_table(it, schema: PartialSchema) -> fd:
+def _tsd_from_table(it, key_schema: PartialSchema, schema: PartialSchema) -> fd:
     if schema.partition_keys:
         old_k = None
         out = {}
         values = []
         for r in it:
             removed = r[0]
-            key = r[1]
+            row_values = iter(r[1:])
+            key = key_schema.from_table(row_values)
             if old_k is None:
                 old_k = key
             elif old_k != key:
@@ -311,18 +311,19 @@ def _tsd_from_table(it, schema: PartialSchema) -> fd:
             if removed:
                 out[key] = REMOVE_IF_EXISTS
                 continue
-            values.append(r[2:])
+            values.append(tuple(row_values))
         if values:
             out[key] = schema.from_table(iter(values))
     else:
         out = {}
         for r in it:
             removed = r[0]
-            key = r[1]
+            values = iter(r[1:])
+            key = key_schema.from_table(values)
             if removed:
                 out[key] = REMOVE_IF_EXISTS
             else:
-                out[key] = schema.from_table(iter(r[2:]))
+                out[key] = schema.from_table(values)
     return fd(out)
 
 

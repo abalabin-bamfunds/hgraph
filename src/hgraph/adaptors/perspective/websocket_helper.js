@@ -1,5 +1,5 @@
 export class WebSocketHelper {
-    constructor(url) {
+    constructor(url, cb = null) {
         this.url = url;
         this.ws = null;
         this.connected = false;
@@ -11,6 +11,8 @@ export class WebSocketHelper {
         this.connectionReject = null;
 
         this.connectMessages = [];
+
+        this.on_message = cb;
     }
 
     async connect(timeout = 30000) {
@@ -45,13 +47,11 @@ export class WebSocketHelper {
             setTimeout(() => this.connect(), 3000);
         };
 
-        this.ws.onmessage = (event) => {
+        this.ws.onmessage = async (event) => {
             try {
-                const response = JSON.parse(event.data);
-                if (response.request_id && this.pendingRequests.has(response.request_id)) {
-                    const { resolve, reject } = this.pendingRequests.get(response.request_id);
-                    this.pendingRequests.delete(response.request_id);
-                    resolve(response.message);
+                const message = JSON.parse(event.data instanceof String ? event.data : await event.data.text());
+                if (this.on_message) {
+                    this.on_message(message);
                 }
             } catch (error) {
                 console.error('Error processing message:', error);
@@ -90,12 +90,10 @@ export class WebSocketHelper {
             return;
         }
 
-        const payload = {
-            message
-        };
+        const payload = typeof message === "string" || message instanceof String ? `{"message": ${message}}` : JSON.stringify({message});
 
         try {
-            this.ws.send(JSON.stringify(payload));
+            this.ws.send(payload);
         } catch (error) {
             console.error('Error sending message:', error);
             this.pendingMessages.push(message);
@@ -109,12 +107,10 @@ export class WebSocketHelper {
             return;
         }
 
-        const payload = {
-            message
-        };
+        const payload = typeof message === "string" || message instanceof String ? `{"message": ${message}}` : JSON.stringify({message});
 
         try {
-            this.ws.send(JSON.stringify(payload));
+            this.ws.send(payload);
         } catch (error) {
             console.error('Error sending message:', error);
         }

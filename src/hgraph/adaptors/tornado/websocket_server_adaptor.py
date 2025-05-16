@@ -1,5 +1,6 @@
 import asyncio
 from dataclasses import dataclass
+import logging
 from typing import Callable
 
 import tornado.websocket
@@ -29,6 +30,9 @@ from hgraph import (
     REMOVE,
 )
 from hgraph.adaptors.tornado._tornado_web import TornadoWeb
+
+
+logger = logging.getLogger("wensocket_server_adaptor")
 
 
 @dataclass(frozen=True)
@@ -273,12 +277,13 @@ def websocket_server_adaptor_impl(path: str, port: int):
     responses = {}
     for url, handler in WebSocketAdaptorManager.instance().handlers.items():
         if isinstance(handler, WiringNodeClass):
+            logger.info("Adding WS handler: [%s] %s", url, handler.signature.signature)
             if handler.signature.time_series_inputs["request"].matches_type(TSB[WebSocketServerRequest]):
                 responses[url] = map_(handler, request=requests_by_url[url])
             elif handler.signature.time_series_inputs["request"].matches_type(TSD[int, TSB[WebSocketServerRequest]]):
                 responses[url] = handler(request=requests_by_url[url])
         elif handler is None:
-            pass
+            logger.info("Pre-wired WS handler: [%s]s", url)
         else:
             raise ValueError(f"Invalid handler type for the websocket_ adaptor: {handler}")
 

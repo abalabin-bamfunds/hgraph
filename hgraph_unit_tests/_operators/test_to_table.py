@@ -180,6 +180,52 @@ def test_table_schema_tsd_ts_simple_scalar():
     )
 
 
+def test_table_schema_tsd_complex_key():
+    assert table_schema(TSD[MCS, TS[int]]).value == make_table_schema(
+        TSD[MCS, TS[int]],
+        (
+            "__key_1_removed__",
+            "__key_1_e__",
+            "__key_1_f__",
+            "value",
+        ),
+        (
+            bool,
+            str,
+            float,
+            int,
+        ),
+        ("__key_1_e__", "__key_1_f__"),
+        ("__key_1_removed__",),
+    )
+
+
+def test_table_schema_tsd_more_complex_key():
+    assert table_schema(TSD[MyCompoundScalar, TS[int]]).value == make_table_schema(
+        TSD[MyCompoundScalar, TS[int]],
+        (
+            "__key_1_removed__",
+            "__key_1_a__",
+            "__key_1_b__",
+            "__key_1_c__",
+            "__key_1_d.e__",
+            "__key_1_d.f__",
+            "value",
+        ),
+        (
+            bool,
+            str,
+            int,
+            bool,
+            str,
+            float,
+            int,
+        ),
+        ("__key_1_a__", "__key_1_b__", "__key_1_c__", "__key_1_d.e__", "__key_1_d.f__"),
+        ("__key_1_removed__",),
+    )
+
+
 def test_to_table_tsd_ts_simple_scalar():
 
     @graph
@@ -238,6 +284,35 @@ def test_to_table_tsd_tsd_ts_simple_scalar():
             (
                 (MIN_ST + MIN_TD * 2, as_of, False, "b", False, "c1", 3),
                 (MIN_ST + MIN_TD * 2, as_of, True, "a", None, None, None),
+            ),
+        ]
+
+
+@dataclass(frozen=True)
+class KCS(CompoundScalar):
+    e: str
+    f: int
+
+
+def test_to_table_tsd_tsd_ts_complex_key():
+
+    @graph
+    def table_test(
+        ts: TSD[str, TSD[KCS, TS[int]]],
+    ) -> TS[tuple[tuple[datetime, datetime, bool, str, bool, str, int, int], ...]]:
+        return to_table(ts)
+
+    with GlobalState() as gs:
+        as_of = MIN_ST + 10 * MIN_TD
+        set_as_of(as_of)
+        assert eval_node(
+            table_test, [fd({"a": fd({KCS(e="a1", f=1): 1})}), fd({"a": fd({KCS(e="a2", f=1): 2})}), fd({"a": REMOVE, "b": fd({KCS(e="c1", f=1): 3})})]
+        ) == [
+            ((MIN_ST, as_of, False, "a", False, "a1", 1, 1),),
+            ((MIN_ST + MIN_TD, as_of, False, "a", False, "a2", 1, 2),),
+            (
+                (MIN_ST + MIN_TD * 2, as_of, False, "b", False, "c1", 1, 3),
+                (MIN_ST + MIN_TD * 2, as_of, True, "a", None, None, None, None),
             ),
         ]
 

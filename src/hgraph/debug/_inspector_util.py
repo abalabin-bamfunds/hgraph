@@ -409,7 +409,7 @@ def inspect_type(value, key):
 
 @inspect_type.register
 def inspect_type_tsb(value: HgTSBTypeMetaData, key):
-    return value.meta_data_schema[key]
+    return value.bundle_schema_tp.meta_data_schema[key]
 
 
 @inspect_type.register
