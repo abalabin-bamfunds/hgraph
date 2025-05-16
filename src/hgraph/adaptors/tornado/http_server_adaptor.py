@@ -7,6 +7,7 @@ from typing import Callable
 
 import tornado
 from frozendict import frozendict
+import tornado.iostream
 
 from hgraph import (
     CompoundScalar,
@@ -219,15 +220,20 @@ class HttpHandler(tornado.web.RequestHandler):
             id(request_obj),
             request_obj,
         )
-        self.set_status(response.status_code)
-        for k, v in response.headers.items():
-            self.set_header(k, v)
-        for k, v in response.cookies.items():
-            if isinstance(v, str):
-                self.set_cookie(k, v)
-            elif isinstance(v, dict):
-                self.set_cookie(k, **v)
-        await self.finish(response.body)
+
+        try:
+            self.set_status(response.status_code)
+            for k, v in response.headers.items():
+                self.set_header(k, v)
+            for k, v in response.cookies.items():
+                if isinstance(v, str):
+                    self.set_cookie(k, v)
+                elif isinstance(v, dict):
+                    self.set_cookie(k, **v)
+            await self.finish(response.body)
+        except tornado.iostream.StreamClosedError:
+            pass  # the client closed the connection before we could send the response
+
         self.mgr.remove_request(id(request_obj))
 
 
