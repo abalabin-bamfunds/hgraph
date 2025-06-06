@@ -457,7 +457,7 @@ async function connectEditableTable(workspace, table_name, removes_table, index,
                     const update_table = await worker.table(updated.delta);
                     const update_view = await update_table.view();
                     const update_data = await update_view.to_json();
-                    const update_data_filtered = update_data.filter((x) => x._id !== 0 && x._id !== null && _id !== 'undefined');
+                    const update_data_filtered = update_data.filter((x) => x._id !== 0 && x._id !== null && x._id !== 'undefined');
                     await table.update(update_data_filtered, {port_id: workspace_table.edit_port});
                 } else {
                     await table.update(updated.delta, {port_id: workspace_table.edit_port});
@@ -684,7 +684,7 @@ export async function connectJoinTable(workspace, table_name, schema, index, des
             workspace_table.edit_table = edit_table;
             workspace_table.edit_table_name = edit_table_name;
             workspace_table.edit_port = edit_port;
-            workspace_table.editable = true;
+            workspace_table.editable = workspace_tables[edit_table_name].editable;
 
             if ('column_editors' in workspace_table && workspace_table.column_editors === 'inherit') {
                 workspace_table.column_editors = workspace_tables[edit_table_name].column_editors;
@@ -1102,7 +1102,7 @@ export function getWorkspaceTables() {
     return workspace_tables;
 }
 
-export async function connectWorkspaceTables(workspace, table_config, new_api, management_ws){
+export async function connectWorkspaceTables(workspace, table_config, user_roles, new_api, management_ws){
     const is_new_api = new_api === "true";
     const worker = is_new_api ? await perspective.worker(): perspective.worker();
 
@@ -1126,6 +1126,13 @@ export async function connectWorkspaceTables(workspace, table_config, new_api, m
         if (typeof(table.description) === 'string')
             table.description = table.description ? JSON.parse(table.description) : {};
 
+        const websocket = table.editable ? websocket_rw : websocket_ro;
+        if (table.editable && table.edit_role){
+            if (!user_roles.includes(table.edit_role)){
+                table.editable = false;
+            }
+        }
+
         table.start = () => {};
 
         workspace_tables[table.name] = table
@@ -1134,7 +1141,7 @@ export async function connectWorkspaceTables(workspace, table_config, new_api, m
             table_promises.push(connectServerTable(
                 workspace,
                 table.name,
-                table.editable ? websocket_rw : websocket_ro,
+                table.editable ? websocket : websocket_ro,
                 worker));
 
         } else if (table.type === "client_table" && !table.editable) {
@@ -1143,7 +1150,7 @@ export async function connectWorkspaceTables(workspace, table_config, new_api, m
                 table.name,
                 !!table.index,
                 table.index,
-                websocket_ro,
+                websocket,
                 websocket_ro,
                 worker));
         } else if (table.type === "client_table" && table.editable) {
@@ -1152,7 +1159,7 @@ export async function connectWorkspaceTables(workspace, table_config, new_api, m
                 table.name,
                 !!table.index,
                 table.index,
-                websocket_rw,
+                websocket,
                 websocket_ro,
                 worker));
         } else if (table.type === "client_only_table") {

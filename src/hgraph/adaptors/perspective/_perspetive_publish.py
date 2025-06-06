@@ -33,7 +33,7 @@ from ._perspective import PerspectiveTablesManager
 
 @operator
 def _publish_table(
-    name: str, ts: TIME_SERIES_TYPE, editable: bool = False, empty_row: bool = False, history: int = None
+    name: str, ts: TIME_SERIES_TYPE, editable: bool = False, edit_role: str = None, empty_row: bool = False, history: int = None
 ): ...
 
 
@@ -45,11 +45,12 @@ def _receive_table_edits(name: str, type: Type[TIME_SERIES_TYPE]) -> TIME_SERIES
     ...
 
 
-@sink_node(overloads=_publish_table)
+@sink_node(overloads=_publish_table, label="{name}")
 def _publish_table_from_tsd(
     name: str,
     ts: TSD[K, TIME_SERIES_TYPE],
     editable: bool = False,
+    edit_role: str = None,
     empty_row: bool = False,
     index_col_name: str = None,
     history: int = None,
@@ -75,6 +76,10 @@ def _publish_table_from_tsd(
             data = [{**state.process_key(k), **row} for row in state.process_row(v)]
             if state.create_index:
                 data = [{**i, **state.create_index(i)} for i in data]
+                
+            if history is not None:
+                sample = [{**data, "time": ec.evaluation_time} for data in data]
+                state.history += sample  # multirow types do not do partial updates do data and a sample are always the same
 
             index = state.index
             updated_indices = set(i[index] for i in data)
@@ -93,6 +98,12 @@ def _publish_table_from_tsd(
             data = {**state.process_key(k), **state.process_row(v)}
             if state.create_index:
                 data = {**data, **state.create_index(data)}
+            if history is not None:
+                if state.sample_row:
+                    sample = {**state.sample_row(v), **data, "time": ec.evaluation_time}
+                    state.history.append(sample)
+                else:
+                    state.history.append({**data, "time": ec.evaluation_time})
 
             new_index = (
                 data[state.index]
@@ -114,9 +125,12 @@ def _publish_table_from_tsd(
     if sched.is_scheduled_now:
         state.manager.update_table(name, state.data, state.removed)
         if history:
-            state.manager.update_table(name + "_history", [{"time": ec.evaluation_time, **d} for d in state.data])
+            state.manager.update_table(name + "_history", state.history)
+        elif history is 0:
+            state.manager.replace_table(name + "_history", state.history)
 
         state.data = []
+        state.history = []
         state.removed = set()
 
 
@@ -126,6 +140,7 @@ def _publish_table_from_tsd_start(
     index_col_name: str,
     history: int,
     editable: bool,
+    edit_role: str,
     empty_row: bool,
     _key: Type[K],
     _schema: Type[TIME_SERIES_TYPE],
@@ -182,6 +197,9 @@ def _publish_table_from_tsd_start(
             state.process_row = lambda v: v.delta_value | {k: v[k].value for k in residual_index_col_names}
         else:
             state.process_row = lambda v: v.delta_value
+
+        state.sample_row = lambda v: {k: ts.value if ts.valid else None for k, ts in v.items()}
+
         state.multi_row = False
     elif isinstance(_schema, HgTSTypeMetaData):
         if isinstance(_schema.value_scalar_tp, HgCompoundScalarType):
@@ -196,6 +214,8 @@ def _publish_table_from_tsd_start(
             state.schema = {"value": _schema.value_scalar_tp.py_type}
             state.process_row = lambda v: {"value": v.value}
             state.multi_row = False
+
+        state.sample_row = False
     else:
         raise ValueError(f"Unsupported schema type '{_schema}'")
 
@@ -219,6 +239,7 @@ def _publish_table_from_tsd_start(
             index="_id",
             name=name,
             editable=editable,
+            edit_role=edit_role
         )
         empty_values = (
             [i.py_type() for i in _key.element_types] if isinstance(_key, HgTupleFixedScalarType) else _key.py_type()
@@ -231,16 +252,18 @@ def _publish_table_from_tsd_start(
             index=state.index,
             name=name,
             editable=editable,
+            edit_role=edit_role
         )
 
     state.data = []
+    state.history = []
     state.removed = set()
     state.key_tracker = defaultdict(set) if state.multi_row else {}
 
-    if history:
+    if history is not None:
         history_table = manager.create_table(
             {"time": datetime, **state.key_schema, **{k: v for k, v in state.schema.items()}},
-            limit=min(history, 4294967295),
+            limit=min(history, 4294967295) if history > 0 else None,
             name=name + "_history",
         )
 
@@ -250,7 +273,7 @@ class TableEdits(TimeSeriesSchema, Generic[K, TIME_SERIES_TYPE]):
     removes: TSS[K]
 
 
-@push_queue(TSB[TableEdits[K, TIME_SERIES_TYPE]], overloads=_receive_table_edits)
+@push_queue(TSB[TableEdits[K, TIME_SERIES_TYPE]], overloads=_receive_table_edits, label="{name}")
 def _receive_table_edits_tsd(
     sender: Callable,
     name: str,
@@ -309,6 +332,7 @@ def _receive_table_edits_tsd(
                 edits[key] = process_row(row, index)
 
         sender({"edits": edits, "removes": removes})
+        data.delete()
 
     manager = PerspectiveTablesManager.current()
     manager.subscribe_table_updates(name, on_update)

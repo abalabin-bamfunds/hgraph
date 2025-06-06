@@ -223,6 +223,19 @@
                     document.getElementById('loading-message').innerText = "Logging in...";
                     await new Promise(res => setTimeout(res, 100));
 
+                    {% try %}
+                    {% if mgr.options.get('user_roles') %}
+                    const user_roles = [{{ ', '.join(f'"{r}"' for r in mgr.options.get('user_roles').get(current_user, mgr.options.get('user_roles').get("DEFAULT", []))) }}]
+                    {% else %}
+                    const user_roles = [];
+                    {% end %}
+                    {% except %}
+                    const user_roles = [];
+                    {% end %}
+
+                    {% if mgr.options.get('require_login') %}
+                    {% end %}
+
                     {% if mgr.options.get('require_login') %}
                     const token = await (await fetchWithAuth("{{mgr.options['login_url']}}")).text();
                     {% else %}
@@ -253,7 +266,7 @@
                     setTimeout(async () => {
                         document.getElementById('loading-message').innerText = "Setting up tables...";
                         const req = fetch("/layout/{{url}}");
-                        await connectWorkspaceTables(workspace, table_config, "{{'true' if mgr.is_new_api() else 'false'}}", management_ws);
+                        await connectWorkspaceTables(workspace, table_config, user_roles, "{{'true' if mgr.is_new_api() else 'false'}}", management_ws);
 
                         document.getElementById('loading-message').innerText = "Loading layout...";
                         let json = await (await req).json();

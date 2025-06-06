@@ -440,6 +440,7 @@ def validate_and_resolve_signature(
             )
         )
         resolved_inputs = signature.resolve_auto_resolve_kwargs(resolution_dict, kwarg_types, kwargs, resolved_inputs)
+        resolved_label = signature.resolve_label(resolution_dict, kwargs)
 
         if (
             signature.is_resolved
@@ -452,6 +453,8 @@ def validate_and_resolve_signature(
             signature.validate_requirements(resolution_dict, kwargs)
             if passive_keys:
                 signature = signature.copy_with(active_inputs=active_inputs)
+            if resolved_label != signature.label:
+                signature = signature.copy_with(label=resolved_label)
             return (
                 kwargs,
                 signature if record_replay_id is None else signature.copy_with(record_and_replay_id=record_replay_id),
@@ -466,6 +469,7 @@ def validate_and_resolve_signature(
                 valid_inputs=valid_inputs,
                 all_valid_inputs=all_valid_inputs,
                 unresolved_args=frozenset(),
+                label=resolved_label,
                 record_and_replay_id=record_replay_id,
             )
             if resolve_signature.is_resolved and __enforce_output_type__ or resolve_signature.is_weakly_resolved:
