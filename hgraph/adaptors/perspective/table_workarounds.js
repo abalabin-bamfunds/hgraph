@@ -797,7 +797,7 @@ async function refreshTimeSensitiveViews(event, viewer) {
             viewer.dataset.refresh_timeout = setInterval(async () => {
                 const config = await viewer.save();
                 config.expressions = Object.fromEntries(Object.entries(config.expressions)
-                    .map(([k, v]) => [k, v.replace(/^var refresh := now\(\).+$/, `var refresh := now(); // ${new Date()}`)])
+                    .map(([k, v]) => [k, v.replace(/var refresh := now\(\).*$/m, `var refresh := now(); // ${new Date()}`)])
                 );
                 await viewer.restore(config);
             }, 60000);

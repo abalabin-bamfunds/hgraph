@@ -90,7 +90,7 @@ def process_node_stats(state, node_id, item_id, load_detailed = False):
 def process_graph_stats(state, graph_id, item_id, load_detailed = False):
     root_graph = state.observer.get_graph_info(())
     gi = state.observer.get_graph_info(graph_id)
-    parent_time = state.observer.get_graph_info(gi.graph.parent_node.graph.graph_id).eval_time
+    parent_time = state.observer.get_graph_info(gi.graph.parent_node.graph.graph_id).eval_time if graph_id != () else None
     str_id = item_id.to_str()
     state.perf_data.setdefault(str_id, dict(id=str_id)).update(
             evals=gi.eval_count,

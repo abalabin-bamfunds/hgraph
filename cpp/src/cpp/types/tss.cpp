@@ -126,19 +126,11 @@ namespace hgraph
     }
 
     nb::object TimeSeriesSetOutput::py_added() const {
-        nb::set result;
-        for (auto elem : _storage.added()) {
-            result.add(elem.to_python());
-        }
-        return nb::frozenset(result);
+        return _storage.added().to_python();
     }
 
     nb::object TimeSeriesSetOutput::py_removed() const {
-        nb::set result;
-        for (auto elem : _storage.removed()) {
-            result.add(elem.to_python());
-        }
-        return nb::frozenset(result);
+        return _storage.removed().to_python();
     }
 
     nb::object TimeSeriesSetOutput::py_value() const {
