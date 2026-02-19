@@ -107,6 +107,7 @@ export function columnSettings(view, column, setting) {
 let lock_callback = null;
 export async function updateLockedMode(workspace, mode, locked, cb){
     if (cb) {
+        if (lock_callback && mode.locked == locked) return;
         lock_callback = cb;
     }
 
@@ -169,7 +170,7 @@ export async function installTableWorkarounds(mode, lockCallback) {
 
             g.addEventListener("perspective-config-update", async (event) => {
                 if (g.dataset.config_open === 'false') {
-                    await refreshTimeSensitiveViews(event, g);
+                    await refreshTimeSensitiveViews(event, g, mode);
                 }
                 if (g.dataset.config_open !== 'true') {
                     const title = view_config.title;
@@ -187,7 +188,7 @@ export async function installTableWorkarounds(mode, lockCallback) {
                     }
                 }
             });
-            await refreshTimeSensitiveViews({detail: config.viewers[g.slot]}, g);
+            await refreshTimeSensitiveViews({detail: config.viewers[g.slot]}, g, mode);
 
             g.dataset.events_set_up = "true";
         }
@@ -785,7 +786,7 @@ async function focusin(event, viewer, table, model, table_config) {
     }
 }
 
-async function refreshTimeSensitiveViews(event, viewer) {
+async function refreshTimeSensitiveViews(event, viewer, mode) {
     if (!event.detail || !event.detail.expressions) return;
     
     const has_now = Object.entries(event.detail.expressions)
@@ -799,7 +800,10 @@ async function refreshTimeSensitiveViews(event, viewer) {
                 config.expressions = Object.fromEntries(Object.entries(config.expressions)
                     .map(([k, v]) => [k, v.replace(/var refresh := now\(\).*$/m, `var refresh := now(); // ${new Date()}`)])
                 );
+                const mode_editable = mode.editable;
+                mode.editable = false;
                 await viewer.restore(config);
+                mode.editable = mode_editable;
             }, 60000);
         }
     } else {
