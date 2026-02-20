@@ -105,7 +105,7 @@ export function columnSettings(view, column, setting) {
 }
 
 let lock_callback = null;
-export async function updateLockedMode(workspace, mode, locked, cb){
+export async function updateLockedMode(workspace, mode, locked, cb, call_cb){
     if (cb) {
         if (lock_callback && mode.locked == locked) return;
         lock_callback = cb;
@@ -117,17 +117,17 @@ export async function updateLockedMode(workspace, mode, locked, cb){
         lockLayout(workspace);
         mode.editable = false;
         addCustomContextMenuItems(workspace, [
-            {name: 'Unlock Layout', action: () => updateLockedMode(workspace, mode, false)}
+            {name: 'Unlock Layout', action: () => updateLockedMode(workspace, mode, false, undefined, true)}
         ], 
         {disableBuiltInItems: ['New Table', 'Duplicate', 'Create Global Filter', 'Open Settings', 'Reset', 'Close'], checkItems: ['New Table']});
 
-        if (lock_callback) {
+        if (call_cb) {
             lock_callback();
         }
     } else {
         unlockLayout(workspace);
         addCustomContextMenuItems(workspace, [
-            {name: 'Lock Layout', action: () => updateLockedMode(workspace, mode, true)}
+            {name: 'Lock Layout', action: () => updateLockedMode(workspace, mode, true, undefined, true)}
         ],
         {checkItems: ['New Table']});
     }
@@ -140,7 +140,7 @@ export async function installTableWorkarounds(mode, lockCallback) {
 
     const config = await window.workspace.save();
 
-    await updateLockedMode(window.workspace, mode, mode.locked || false, lockCallback);
+    await updateLockedMode(window.workspace, mode, mode.locked || false, lockCallback, false);
 
     for (const g of document.querySelectorAll("perspective-viewer")) {
         if (!g.dataset.events_set_up) {
