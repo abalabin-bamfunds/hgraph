@@ -5,13 +5,18 @@ from dataclasses import asdict
 from datetime import datetime, timedelta
 from typing import Any, Callable, Generic, Type
 
+import polars as pl
+import pyarrow
 from perspective import View
 
 from hgraph import (
     AUTO_RESOLVE,
+    COMPOUND_SCALAR,
+    Frame,
     SCHEDULER,
     STATE,
     TIME_SERIES_TYPE,
+    TS,
     TSB,
     TSD,
     TSS,
@@ -45,6 +50,7 @@ def _publish_table(
     edit_role: str = None,
     empty_row: bool = False,
     history: int = None,
+    track_keys: bool = True,
 ): ...
 
 
@@ -64,6 +70,7 @@ def _publish_table_from_tsd(
     empty_row: bool = False,
     index_col_name: str = None,
     history: int = None,
+    track_keys: bool = True,
     _key: Type[K] = AUTO_RESOLVE,
     _schema: Type[TIME_SERIES_TYPE] = AUTO_RESOLVE,
     ec: EvaluationClock = None,
@@ -173,59 +180,8 @@ def _publish_table_from_tsd_start(
     if name in manager.get_table_names():
         raise ValueError(f"Table '{name}' already exists")
 
-    index_col_names = [s.strip() for s in index_col_name.split(",")]
-
     # process the key types
-    _key = HgScalarTypeMetaData.parse_type(_key)
-    if isinstance(_key, HgTupleFixedScalarType):
-        ks_tps = _key.py_type.__args__
-        ks = len(ks_tps)
-        if index_col_name:
-            index = index_col_names[:ks]
-        else:
-            index = [f"index_{i}" for i in range(ks)]
-
-        index_col_name = "index"
-
-        state.process_key = lambda k: {index[i]: ki for i, ki in enumerate(k)}
-        state.create_index = lambda v: {"index": ",".join(str(v[i]) for i in index_col_names)}
-        state.create_row_key = lambda v: tuple(v[i] for i in index_col_names)
-        state.key_schema = {"index": str, **{index[i]: ks_tps[i] for i in range(ks)}}
-
-        residual_index_col_names = index_col_names[ks:]
-    elif isinstance(_key, HgCompoundScalarType):
-        if index_col_name:
-            index = [i for i in index_col_names if i in _key.meta_data_schema]
-        else:
-            index = list(_key.meta_data_schema.keys())
-
-        index_col_name = "index"
-
-        state.process_key = lambda k: {index[i]: getattr(k, index[i]) for i in range(len(index))}
-        state.create_index = lambda v: {"index": ",".join(str(v[i]) for i in index_col_names)}
-        state.create_row_key = lambda v: _key.py_type(**{i: v[i] for i in index_col_names})
-        state.key_schema = {"index": str, **{k: v.py_type for k, v in _key.meta_data_schema.items() if k in index}}
-
-        residual_index_col_names = [i for i in index_col_names if i not in index]
-    else:
-        if index_col_name is None:
-            index = "index"
-        else:
-            index = index_col_names[0]
-
-        residual_index_col_names = index_col_names[1:]
-
-        if residual_index_col_names:
-            state.process_key = lambda k: {"index": str, index: k}
-            state.create_index = lambda v: {"index": ",".join(str(v[i]) for i in index_col_names)}
-            state.create_row_key = lambda v: tuple(v[i] for i in index_col_names)
-            state.key_schema = state.process_key(_key.py_type)
-            index_col_name = "index"
-        else:
-            state.process_key = lambda k: {index: k}
-            state.create_index = None
-            state.create_row_key = lambda v: v[index]
-            state.key_schema = state.process_key(_key.py_type)
+    _key, residual_index_col_names = _configure_tsd_key_publishing(state, index_col_name, _key)
 
     # process the value type
     _schema = HgTimeSeriesTypeMetaData.parse_type(_schema)
@@ -256,8 +212,6 @@ def _publish_table_from_tsd_start(
         state.sample_row = False
     else:
         raise ValueError(f"Unsupported schema type '{_schema}'")
-
-    state.index = index_col_name or "index"
 
     if empty_row:
         state.map_index = True
@@ -311,6 +265,165 @@ def _publish_table_from_tsd_start(
             limit=min(history, 4294967295) if history > 0 else None,
             name=name + "_history",
         )
+
+
+@sink_node(
+    overloads=_publish_table,
+    label="{name}",
+    requires=lambda track_keys, editable: track_keys == False and editable == False
+)
+def publish_table_from_tsd_frame_no_track(
+    name: str,
+    ts: TSD[K, TS[Frame[COMPOUND_SCALAR]]],
+    editable: bool = False,
+    edit_role: str = None,
+    empty_row: bool = False,
+    index_col_name: str = None,
+    history: int = None,
+    track_keys: bool = True,
+    _key: Type[K] = AUTO_RESOLVE,
+    _schema: Type[TIME_SERIES_TYPE] = AUTO_RESOLVE,
+    ec: EvaluationClock = None,
+    state: STATE = None,
+    sched: SCHEDULER = None,
+):
+    if ts.modified and not sched.is_scheduled:
+        sched.schedule(timedelta(milliseconds=250), on_wall_clock=True, tag='-')
+
+    if sched.is_scheduled_now:
+        items = [(key, value.value) for key, value in ts.valid_items()]
+        frame = _build_tsd_frame_for_perspective(items, state)
+        state.manager.replace_table(name, _frame_to_arrow_ipc(frame) if frame is not None else state.empty_arrow)
+
+        if history is not None:
+            history_frame = (
+                frame.select(pl.lit(ec.evaluation_time).alias("time"), pl.all()) if frame is not None else None
+            )
+            if history > 0:
+                if history_frame is not None:
+                    state.manager.update_table(name + "_history", _frame_to_arrow_ipc(history_frame))
+            else:
+                state.manager.replace_table(
+                    name + "_history",
+                    _frame_to_arrow_ipc(history_frame) if history_frame is not None else state.empty_history_arrow,
+                )
+
+
+@publish_table_from_tsd_frame_no_track.start
+def _publish_table_from_tsd_frame_no_track_start(
+    name: str,
+    index_col_name: str,
+    history: int,
+    editable: bool,
+    edit_role: str,
+    empty_row: bool,
+    _key: Type[K],
+    _schema: Type[TIME_SERIES_TYPE],
+    state: STATE,
+):
+    manager = PerspectiveTablesManager.current()
+    state.manager = manager
+
+    if name in manager.get_table_names():
+        raise ValueError(f"Table '{name}' already exists")
+
+    _key, _ = _configure_tsd_key_publishing(state, index_col_name, _key)
+    _schema = HgTimeSeriesTypeMetaData.parse_type(_schema)
+    if not isinstance(_schema, HgTSTypeMetaData) or not isinstance(_schema.value_scalar_tp, HgDataFrameScalarTypeMetaData):
+        raise ValueError(f"Unsupported schema type '{_schema}'")
+
+    state.schema = {k: v.py_type for k, v in _schema.value_scalar_tp.schema.meta_data_schema.items()}
+    state.table_columns = tuple([*state.key_schema.keys(), *state.schema.keys()])
+
+    table = manager.create_table(
+        {**state.key_schema, **state.schema},
+        index=state.index,
+        name=name,
+        editable=editable,
+        edit_role=edit_role,
+    )
+    view = table.view()
+    state.empty_arrow = view.to_arrow()
+    view.delete()
+
+    if history is not None:
+        history_table = manager.create_table(
+            {"time": datetime, **state.key_schema, **state.schema},
+            limit=min(history, 4294967295) if history > 0 else None,
+            name=name + "_history",
+        )
+        view = history_table.view()
+        state.empty_history_arrow = view.to_arrow()
+        view.delete()
+
+
+def _build_index_value(row: dict[str, Any], index_columns: tuple[str, ...]) -> str:
+    return ",".join(str(row[column]) for column in index_columns)
+
+
+def _frame_to_arrow_ipc(frame: pl.DataFrame) -> bytes:
+    table = frame.to_arrow()
+    stream = pyarrow.BufferOutputStream()
+    with pyarrow.ipc.new_stream(stream, table.schema) as writer:
+        writer.write_table(table)
+    return stream.getvalue().to_pybytes()
+
+
+def _build_tsd_frame_for_perspective(items: list[tuple[Any, pl.DataFrame]], state) -> pl.DataFrame | None:
+    frames = []
+    for key, frame in items:
+        keyed_frame = frame.with_columns(**{column: pl.lit(value) for column, value in state.process_key(key).items()})
+        if state.index_components:
+            keyed_frame = keyed_frame.with_columns(
+                pl.concat_str([pl.col(column).cast(pl.String) for column in state.index_components], separator=",").alias("index")
+            )
+        frames.append(keyed_frame.select(*state.table_columns))
+
+    if frames:
+        return pl.concat(frames)
+
+
+def _configure_tsd_key_publishing(state, index_col_name: str, _key: Type[K]):
+    index_col_names = [s.strip() for s in index_col_name.split(",")] if index_col_name else []
+    _key = HgScalarTypeMetaData.parse_type(_key)
+
+    if isinstance(_key, HgTupleFixedScalarType):
+        ks_tps = _key.py_type.__args__
+        key_columns = tuple(index_col_names[: len(ks_tps)] if index_col_names else (f"index_{i}" for i in range(len(ks_tps))))
+        state.process_key = lambda k, columns=key_columns: {columns[i]: ki for i, ki in enumerate(k)}
+        state.index_components = tuple(index_col_names or key_columns)
+        state.create_index = lambda v, columns=state.index_components: {"index": _build_index_value(v, columns)}
+        state.create_row_key = lambda v, columns=state.index_components: tuple(v[i] for i in columns)
+        state.key_schema = {"index": str, **{key_columns[i]: ks_tps[i] for i in range(len(ks_tps))}}
+        residual_index_col_names = index_col_names[len(ks_tps) :]
+        state.index = "index"
+    elif isinstance(_key, HgCompoundScalarType):
+        key_columns = tuple(i for i in index_col_names if i in _key.meta_data_schema) if index_col_names else tuple(_key.meta_data_schema.keys())
+        state.process_key = lambda k, columns=key_columns: {column: getattr(k, column) for column in columns}
+        state.index_components = tuple(index_col_names or key_columns)
+        state.create_index = lambda v, columns=state.index_components: {"index": _build_index_value(v, columns)}
+        state.create_row_key = lambda v, columns=state.index_components: _key.py_type(**{i: v[i] for i in columns})
+        state.key_schema = {"index": str, **{k: v.py_type for k, v in _key.meta_data_schema.items() if k in key_columns}}
+        residual_index_col_names = [i for i in index_col_names if i not in key_columns]
+        state.index = "index"
+    else:
+        key_column = index_col_names[0] if index_col_names else "index"
+        residual_index_col_names = index_col_names[1:]
+        state.process_key = lambda k, column=key_column: {column: k}
+        if residual_index_col_names:
+            state.index_components = tuple((key_column, *residual_index_col_names))
+            state.create_index = lambda v, columns=state.index_components: {"index": _build_index_value(v, columns)}
+            state.create_row_key = lambda v, columns=state.index_components: tuple(v[i] for i in columns)
+            state.key_schema = {"index": str, key_column: _key.py_type}
+            state.index = "index"
+        else:
+            state.index_components = None
+            state.create_index = None
+            state.create_row_key = lambda v, column=key_column: v[column]
+            state.key_schema = {key_column: _key.py_type}
+            state.index = key_column
+
+    return _key, residual_index_col_names
 
 
 class TableEdits(TimeSeriesSchema, Generic[K, TIME_SERIES_TYPE]):

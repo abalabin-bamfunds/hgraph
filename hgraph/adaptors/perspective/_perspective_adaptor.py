@@ -51,7 +51,9 @@ __all__ = (
 
 
 @adaptor
-def publish_table(path: str, ts: TSD[K, TIME_SERIES_TYPE], index_col_name: str, history: int = None):
+def publish_table(
+    path: str, ts: TSD[K, TIME_SERIES_TYPE], index_col_name: str, history: int = None, track_keys: bool = True
+):
     """
     Publish a time-series dictionary as a read-only table via the Perspective adaptor.
 
@@ -67,11 +69,13 @@ def publish_table(path: str, ts: TSD[K, TIME_SERIES_TYPE], index_col_name: str, 
 
 
 @adaptor_impl(interfaces=publish_table)
-def publish_table_impl(path: str, ts: TSD[K, TIME_SERIES_TYPE], index_col_name: str, history: int = None):
+def publish_table_impl(
+    path: str, ts: TSD[K, TIME_SERIES_TYPE], index_col_name: str, history: int = None, track_keys: bool = True
+):
     """Implementation of :func:`publish_table`. Delegates to the internal ``_publish_table`` helper."""
     _assert_unique_type_per_path(publish_table)
 
-    _publish_table(path, ts, index_col_name=index_col_name, history=history)
+    _publish_table(path, ts, index_col_name=index_col_name, history=history, track_keys=track_keys)
 
 
 @adaptor
@@ -134,7 +138,13 @@ def publish_table_editable_impl(
 
 @service_adaptor
 def publish_multitable(
-    path: str, key: TS[SCALAR], ts: TIME_SERIES_TYPE, unique: bool, index_col_name: str, history: int = None
+    path: str,
+    key: TS[SCALAR],
+    ts: TIME_SERIES_TYPE,
+    unique: bool,
+    index_col_name: str,
+    history: int = None,
+    track_keys: bool = True,
 ):
     """
     Publish time-series data from multiple graph clients into a single shared table.
@@ -162,6 +172,7 @@ def publish_multitable_impl(
     unique: bool,
     index_col_name: str,
     history: int = None,
+    track_keys: bool = True,
 ):
     """
     Implementation of :func:`publish_multitable`.
@@ -193,10 +204,10 @@ def publish_multitable_impl(
 
         keys = flip(key, unique=False)
         table = map_(lambda keys, ts: merge_references(keys, ts), keys, pass_through(ts))
-        _publish_table(path, table, index_col_name=index_col_name, history=history)
+        _publish_table(path, table, index_col_name=index_col_name, history=history, track_keys=track_keys)
 
     else:
-        _publish_table(path, rekey(ts, key), index_col_name=index_col_name, history=history)
+        _publish_table(path, rekey(ts, key), index_col_name=index_col_name, history=history, track_keys=track_keys)
 
 
 def _assert_unique_type_per_path(adaptor_type):
