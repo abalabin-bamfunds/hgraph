@@ -604,6 +604,16 @@ class GraphWiringNodeClass(BaseWiringNodeClass):
                                 )
                             return None  # TIME_SERIES_TYPE is allowed to be None as a special case
 
+                    if out.output_type is None:  # some graphs like service clients return a wiring port even if there is no output
+                        from hgraph._types._time_series_types import TIME_SERIES_TYPE
+                        if output_type.py_type is TIME_SERIES_TYPE:
+                            return out  # TIME_SERIES_TYPE is allowed to be None as a special case
+                        else:
+                            raise WiringError(
+                                f"{self.signature} was expected to return a time series of type"
+                                f" '{str(output_type)}' but did not return anything"
+                            )
+                        
                     if not output_type.dereference().matches(out.output_type.dereference()):
                         raise WiringError(
                             f"'{self.signature.name}' declares its output as '{str(output_type)}' but "
