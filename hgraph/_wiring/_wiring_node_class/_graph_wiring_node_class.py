@@ -556,7 +556,7 @@ class GraphWiringNodeClass(BaseWiringNodeClass):
                 elif resolved_signature.output_type.is_resolved:
                     return _wiring_port_for(
                         resolved_signature.output_type,
-                        STATE(output_type=resolved_signature.output_type, node=None), # fake wiring node instance
+                        STATE(output_type=resolved_signature.output_type, node=None, inputs=kwargs_), # fake wiring node instance
                         tuple())
 
             # But graph nodes are evaluated at wiring time, so this is the graph expansion happening here!

@@ -186,31 +186,31 @@ namespace hgraph {
             }
 
             // Match the Python runtime invariant check as closely as the C++ runtime can.
-            // Unlike Python we cannot suppress this during exception unwinding, so always emit it.
-            if (has_owning_node()) {
-                auto *node = owning_node();
-                fmt::print(stderr,
-                           "Output instance still has subscribers when released, this is a bug.\n"
-                           "output belongs to node {} node_id=<{}>\n"
-                           "subscriber_count={}\n"
-                           "subscriber_details=[{}]\n"
-                           "output@{:p}\n",
-                           node != nullptr ? node->signature().signature() : std::string("<unknown>"),
-                           node != nullptr ? fmt::format("{}", fmt::join(node->node_id(), ", ")) : std::string("?"),
-                           _subscribers.size(),
-                           fmt::join(subscriber_descriptions, ", "),
-                           static_cast<const void *>(this));
-            } else {
-                fmt::print(stderr,
-                           "Output instance still has subscribers when released, this is a bug.\n"
-                           "output belongs to node <unknown>\n"
-                           "subscriber_count={}\n"
-                           "subscriber_details=[{}]\n"
-                           "output@{:p}\n",
-                           _subscribers.size(),
-                           fmt::join(subscriber_descriptions, ", "),
-                           static_cast<const void *>(this));
-            }
+            // Unlike Python we cannot suppress this during exception unwinding, so it is commented out to be used in debugging scenarios
+            // if (has_owning_node()) {
+            //     auto *node = owning_node();
+            //     fmt::print(stderr,
+            //                "Output instance still has subscribers when released, this is a bug.\n"
+            //                "output belongs to node {} node_id=<{}>\n"
+            //                "subscriber_count={}\n"
+            //                "subscriber_details=[{}]\n"
+            //                "output@{:p}\n",
+            //                node != nullptr ? node->signature().signature() : std::string("<unknown>"),
+            //                node != nullptr ? fmt::format("{}", fmt::join(node->node_id(), ", ")) : std::string("?"),
+            //                _subscribers.size(),
+            //                fmt::join(subscriber_descriptions, ", "),
+            //                static_cast<const void *>(this));
+            // } else {
+            //     fmt::print(stderr,
+            //                "Output instance still has subscribers when released, this is a bug.\n"
+            //                "output belongs to node <unknown>\n"
+            //                "subscriber_count={}\n"
+            //                "subscriber_details=[{}]\n"
+            //                "output@{:p}\n",
+            //                _subscribers.size(),
+            //                fmt::join(subscriber_descriptions, ", "),
+            //                static_cast<const void *>(this));
+            // }
         }
         // Clear subscribers safely without notifications
         _subscribers.clear();
