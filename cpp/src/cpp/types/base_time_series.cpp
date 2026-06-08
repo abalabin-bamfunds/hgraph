@@ -403,8 +403,12 @@ namespace hgraph {
         bool was_bound = bound(); // Track if input was previously bound (matches Python behavior)
 
         if (auto ref_output = std::dynamic_pointer_cast<TimeSeriesReferenceOutput>(output_)) {
-            // Is a TimeseriesReferenceOutput
-            // Match Python behavior: only check if value exists (truthy), bind if it does
+            // A non-reference input can only observe one reference output at a time.
+            // If dynamic graph rewiring rebinds us to a different REF producer, make sure
+            // we unregister from the old producer before observing the new one.
+            if (_reference_output != nullptr && _reference_output.get() != ref_output.get()) {
+                _reference_output->stop_observing_reference(this);
+            }
             if (ref_output->valid() && ref_output->has_value()) { ref_output->value().bind_input(*this); }
             ref_output->observe_reference(this);
             _reference_output = ref_output;

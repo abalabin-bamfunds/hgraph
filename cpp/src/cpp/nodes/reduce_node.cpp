@@ -96,59 +96,6 @@ namespace hgraph {
         auto removed_keys = key_set.collect_removed();
         remove_nodes_from_views(removed_keys);
 
-        // When the upstream REF chain becomes empty (e.g. if_ switches to False),
-        // the cascading un_bind_output may not perfectly report all key removals
-        // through the key_set. Detect this by checking if the accessor's input is
-        // empty/unbound, and if so remove all bound keys.
-        // NOTE: We do NOT check individual key ref values - empty refs on individual
-        // keys are valid (e.g. when reduce lambda uses default() to handle them).
-        bool all_keys_stale = false;
-        if (!tsd->has_output()) {
-            all_keys_stale = true;
-        } else if (tsd->output()) {
-            auto tsd_output = tsd->output();
-            if (tsd_output->has_owning_node()) {
-                auto accessor_node = tsd_output->owning_node();
-                const auto& accessor_input = accessor_node->input();
-                if (accessor_input) {
-                    for (size_t i = 0; i < accessor_input->size(); ++i) {
-                        auto input_item = (*accessor_input)[i];
-                        if (auto ref_input = dynamic_cast<TimeSeriesReferenceInput*>(input_item.get())) {
-                            if (ref_input->value().is_empty()) {
-                                all_keys_stale = true;
-                                break;
-                            }
-                        }
-                        if (auto tsd_input = dynamic_cast<TimeSeriesDictInput*>(input_item.get())) {
-                            if (!tsd_input->has_output()) {
-                                all_keys_stale = true;
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        if (!bound_node_indexes_.empty()) {
-            std::vector<value::View> stale_keys;
-            if (all_keys_stale) {
-                for (const auto &[key, ndx] : bound_node_indexes_) {
-                    stale_keys.push_back(key.view());
-                }
-            } else {
-                // Also catch keys individually missing from the TSD
-                for (const auto &[key, ndx] : bound_node_indexes_) {
-                    if (!tsd->contains(key.view())) {
-                        stale_keys.push_back(key.view());
-                    }
-                }
-            }
-            if (!stale_keys.empty()) {
-                remove_nodes_from_views(stale_keys);
-            }
-        }
-
         auto added_keys = key_set.collect_added();
         add_nodes_from_views(added_keys);
 
@@ -380,6 +327,7 @@ namespace hgraph {
         // This can happen if we're re-binding to a position that was swapped with another bound position
         if (bound_to_key_flags_.contains(old_input.get()) && old_input.get() != ts_.get()) {
             bound_to_key_flags_.erase(old_input.get());
+            throw std::runtime_error("Attempting to bind a key to a node position that was previously bound to another key without unbinding first. This indicates a logic error in the tree management.");
         }
 
         // Create new input bundle with the ts (Python line 198)
