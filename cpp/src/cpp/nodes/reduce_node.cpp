@@ -327,7 +327,6 @@ namespace hgraph {
         // This can happen if we're re-binding to a position that was swapped with another bound position
         if (bound_to_key_flags_.contains(old_input.get()) && old_input.get() != ts_.get()) {
             bound_to_key_flags_.erase(old_input.get());
-            throw std::runtime_error("Attempting to bind a key to a node position that was previously bound to another key without unbinding first. This indicates a logic error in the tree management.");
         }
 
         // Create new input bundle with the ts (Python line 198)
