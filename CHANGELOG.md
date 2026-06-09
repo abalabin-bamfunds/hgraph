@@ -1613,3 +1613,9 @@ Version 0.5.21
 --------------
 
 * Numerous bug fixes
+
+
+Version 0.5.22
+--------------
+
+* Make GlobalState an injectable dependency (for wiring and run-time).
