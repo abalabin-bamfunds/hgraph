@@ -195,7 +195,14 @@ class TSDWiringPort(WiringPort, Generic[SCALAR, TIME_SERIES_TYPE]):
     def reduce(self, fn, zero=ZERO):
         from hgraph import reduce
 
-        return reduce(fn, self, zero)
+        if zero is ZERO:
+            return reduce(fn, self)
+        elif zero is None:
+            from hgraph import nothing
+
+            return reduce(fn, self, nothing(self.output_type.dereference().value_tp.py_type))
+        else:
+            return reduce(fn, self, zero)
 
 
 @dataclass(frozen=True, eq=False, unsafe_hash=False)
@@ -215,7 +222,14 @@ class TSDREFWiringPort(WiringPort, Generic[SCALAR, TIME_SERIES_TYPE]):
     def reduce(self, fn, zero=ZERO):
         from hgraph import reduce
 
-        return reduce(fn, self, zero)
+        if zero is ZERO:
+            return reduce(fn, self)
+        elif zero is None:
+            from hgraph import nothing
+
+            return reduce(fn, self, nothing(self.output_type.dereference().value_tp.py_type))
+        else:
+            return reduce(fn, self, zero)
 
 
 @dataclass(frozen=True, eq=False, unsafe_hash=True)
