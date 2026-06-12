@@ -31,6 +31,7 @@ else:
     psp_new_api = True
 
 from hgraph import TS, GlobalState, sink_node
+from hgraph._runtime._constants import utc_now
 from hgraph.adaptors.tornado._tornado_web import BaseHandler, TornadoWeb
 
 __all__ = ["perspective_web", "PerspectiveTablesManager", "TablePageHandler", "IndexPageHandler"]
@@ -153,16 +154,18 @@ class PerspectiveTablesManager:
             return self._client.table(*args, **kwargs)
 
     @classmethod
-    def set_current(cls, self):
-        assert GlobalState.instance().get("perspective_manager") is None
-        GlobalState.instance()["perspective_manager"] = self
+    def set_current(cls, self, global_state: GlobalState = None):
+        global_state = global_state or GlobalState.instance()
+        assert global_state.get("perspective_manager") is None
+        global_state["perspective_manager"] = self
 
     @classmethod
-    def current(cls) -> "PerspectiveTablesManager":
-        self = GlobalState.instance().get("perspective_manager")
+    def current(cls, global_state: GlobalState = None) -> "PerspectiveTablesManager":
+        global_state = global_state or GlobalState.instance()
+        self = global_state.get("perspective_manager")
         if not self:
             self = PerspectiveTablesManager()
-            GlobalState.instance()["perspective_manager"] = self
+            global_state["perspective_manager"] = self
 
         return self
 
@@ -325,7 +328,7 @@ class PerspectiveTablesManager:
                     batch = pyarrow.record_batch(d, schema=pyarrow.schema({k: schema.field(k).type for k in d}))
                     self._stats['batches'] += 1
                     self._stats['rows'] += batch.num_rows
-                    self._table_stats.append({'table': name, 'batch': i, 'rows': batch.num_rows, 'time': datetime.now(UTC)})
+                    self._table_stats.append({'table': name, 'batch': i, 'rows': batch.num_rows, 'time': utc_now()})
                 except Exception as e:
                     logger.error(
                         f"Error creating record batch :{e}\n"
@@ -496,7 +499,7 @@ class PerspectiveTablesManager:
     async def _publish_heartbeat(self):
         counter = 0
         while True:
-            self.update_table("heartbeat", [{"name": "heartbeat", "time": datetime.now(UTC), "sequence": counter}])
+            self.update_table("heartbeat", [{"name": "heartbeat", "time": utc_now(), "sequence": counter}])
             counter += 1
             await asyncio.sleep(15)
 
@@ -592,9 +595,10 @@ def perspective_web(
     layouts_path: str = None,
     _sig: TS[bool] = True,
     logger: logging.Logger = None,
+    _global_state: GlobalState = None,
 ):
-    perspective_manager = PerspectiveTablesManager.current()
-    app = GlobalState.instance()["perspective_tornado_web"]
+    perspective_manager = PerspectiveTablesManager.current(_global_state)
+    app = _global_state["perspective_tornado_web"]
 
     if _sig.value:
         app.start()
@@ -643,6 +647,7 @@ def perspective_web_start(
     index_template: str = "index_template.html",
     workspace_template: str = "workspace_template.html",
     layouts_path: str = None,
+    _global_state: GlobalState = None,
 ):
 
     if "/" not in table_template:
@@ -652,7 +657,7 @@ def perspective_web_start(
     if "/" not in workspace_template:
         workspace_template = os.path.join(os.path.dirname(__file__), workspace_template)
 
-    perspective_manager = PerspectiveTablesManager.current()
+    perspective_manager = PerspectiveTablesManager.current(_global_state)
     perspective_manager.start()
 
     tempfile.gettempdir()
@@ -726,7 +731,7 @@ def perspective_web_start(
         ),
     )
 
-    GlobalState.instance()["perspective_tornado_web"] = app
+    _global_state["perspective_tornado_web"] = app
 
 
 def _perspective_thread(manager, cb):

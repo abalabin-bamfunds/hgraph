@@ -7,6 +7,7 @@ from typing import Callable
 import tornado.web
 
 from hgraph import graph
+from hgraph._runtime._constants import utc_now
 from hgraph._wiring._decorators import push_queue
 from hgraph._runtime._global_state import GlobalState
 from hgraph._wiring._decorators import sink_node
@@ -25,7 +26,11 @@ def inspector_requests_queue(sender: Callable) -> TS[tuple[object, ...]]:
 
 @sink_node
 def inspector_node(
-    port: int = 8080, publish_interval: float = 2.5, requests: TS[tuple[object, ...]] = None, _state: STATE[InspectorState] = None
+    port: int = 8080,
+    publish_interval: float = 2.5,
+    requests: TS[tuple[object, ...]] = None,
+    _state: STATE[InspectorState] = None,
+    _global_state: GlobalState = None,
 ): ...
 
 @graph
@@ -35,7 +40,13 @@ def inspector(port: int = 8080, publish_interval: float = 2.5):
     
 
 @inspector_node.start
-def start_inspector(port: int, publish_interval: float, requests: TS[tuple[tuple[object, object]]], _state: STATE[InspectorState]):
+def start_inspector(
+    port: int,
+    publish_interval: float,
+    requests: TS[tuple[tuple[object, object]]],
+    _state: STATE[InspectorState],
+    _global_state: GlobalState = None,
+):
     from perspective import Table
 
     from hgraph.adaptors.tornado._tornado_web import TornadoWeb
@@ -44,7 +55,7 @@ def start_inspector(port: int, publish_interval: float, requests: TS[tuple[tuple
     from hgraph.debug._inspector_observer import InspectionObserver
 
     graph = requests.owning_graph
-    _state.requests_queue = GlobalState.instance().inspector_requests_queue
+    _state.requests_queue = _global_state.inspector_requests_queue
     _state.requests.notify = lambda: _state.requests_queue((1,))
 
     _state.observer = InspectionObserver(
@@ -125,7 +136,7 @@ def start_inspector(port: int, publish_interval: float, requests: TS[tuple[tuple
     )
 
     _state.total_data_prev = dict(
-        time=datetime.utcnow(),
+        time=utc_now(),
         evaluation_time=graph.evaluation_clock.evaluation_time,
         cycles=0,
         graph_time=0.0,

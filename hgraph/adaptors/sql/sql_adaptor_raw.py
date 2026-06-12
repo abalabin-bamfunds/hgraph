@@ -1,13 +1,14 @@
 import logging
 import time
 from concurrent.futures import Executor
-from datetime import timedelta, datetime, UTC
+from datetime import timedelta, datetime
 from enum import Enum
 from typing import Callable
 
 import polars as pl
 from polars import DataFrame
 
+from hgraph._runtime._constants import utc_now
 from hgraph.adaptors.executor.executor import adaptor_executor
 from hgraph.adaptors.sql.sql_connection import SqlAdaptorConnection, start_sql_adaptor
 from hgraph import (
@@ -56,8 +57,10 @@ def sql_read_adaptor_raw_impl(
 ) -> TSD[int, TSB[Stream[Data[DataFrame]]]]:
 
     @push_queue(TSD[int, TSB[Stream[Data[DataFrame]]]])
-    def sql_to_graph(sender: Callable, path: str) -> TSD[int, TSB[Stream[Data[DataFrame]]]]:
-        GlobalState.instance()[f"sql_read_adaptor_raw://{path}/queue"] = sender
+    def sql_to_graph(
+        sender: Callable, path: str, _global_state: GlobalState = None
+    ) -> TSD[int, TSB[Stream[Data[DataFrame]]]]:
+        _global_state[f"sql_read_adaptor_raw://{path}/queue"] = sender
 
     def run_query(connection: SqlAdaptorConnection, id: int, query: str, queue):
         try:
@@ -83,7 +86,7 @@ def sql_read_adaptor_raw_impl(
             
             time_taken = (time.perf_counter_ns() - start) / 1_000_000_000
             logger.info(f"Finished query {id} in {time_taken}s with {len(r)} rows")
-            tick = {id: {"status": StreamStatus.OK, "status_msg": "", "values": r, "timestamp": datetime.utcnow()}}
+            tick = {id: {"status": StreamStatus.OK, "status_msg": "", "values": r, "timestamp": utc_now()}}
             queue(tick)
         except Exception as e:
             logger.error(f"Query {id} on {path} failed: {query}")
@@ -98,9 +101,10 @@ def sql_read_adaptor_raw_impl(
         query: TS[str],
         path: str,
         connection: TS[SqlAdaptorConnection],
-        executor: TS[Executor]
+        executor: TS[Executor],
+        _global_state: GlobalState = None,
     ):
-        queue = GlobalState.instance()[f"sql_read_adaptor_raw://{path}/queue"]
+        queue = _global_state[f"sql_read_adaptor_raw://{path}/queue"]
         executor.value.submit(run_query, connection=connection.value, id=id.value, query=query.value, queue=queue)
 
     connection = start_sql_adaptor(path=path)
@@ -134,8 +138,10 @@ def sql_write_adaptor_raw_impl(
 ) -> TSD[int, TSB[Stream[Data[datetime]]]]:
 
     @push_queue(TSD[int, TSB[Stream[Data[datetime]]]])
-    def sql_write_to_graph(sender: Callable, path: str) -> TSD[int, TSB[Stream[Data[datetime]]]]:
-        GlobalState.instance()[f"sql_write_adaptor_raw://{path}/queue"] = sender
+    def sql_write_to_graph(
+        sender: Callable, path: str, _global_state: GlobalState = None
+    ) -> TSD[int, TSB[Stream[Data[datetime]]]]:
+        _global_state[f"sql_write_adaptor_raw://{path}/queue"] = sender
 
     def write_data(connection: SqlAdaptorConnection, id: int, table: str, mode: SQLWriteMode, data: DataFrame, queue):
         try:
@@ -154,8 +160,8 @@ def sql_write_adaptor_raw_impl(
                     id: {
                         "status": StreamStatus.OK,
                         "status_msg": "",
-                        "values": datetime.utcnow(),
-                        "timestamp": datetime.utcnow(),
+                        "values": utc_now(),
+                        "timestamp": utc_now(),
                     }
                 }
                 queue(tick)
@@ -174,8 +180,9 @@ def sql_write_adaptor_raw_impl(
         path: str,
         connection: TS[SqlAdaptorConnection],
         executor: TS[Executor],
+        _global_state: GlobalState = None,
     ):
-        queue = GlobalState.instance()[f"sql_write_adaptor_raw://{path}/queue"]
+        queue = _global_state[f"sql_write_adaptor_raw://{path}/queue"]
         executor.value.submit(
             write_data,
             connection=connection.value,
@@ -208,8 +215,10 @@ def sql_execute_adaptor_raw(path: str, query: TS[str],) -> TSB[Stream[Data[datet
 def sql_execute_adaptor_raw_impl(path: str, query: TSD[int, TS[str]]) -> TSD[int, TSB[Stream[Data[datetime]]]]:
 
     @push_queue(TSD[int, TSB[Stream[Data[datetime]]]])
-    def sql_to_graph(sender: Callable, path: str) -> TSD[int, TSB[Stream[Data[datetime]]]]:
-        GlobalState.instance()[f"sql_execute_adaptor_raw://{path}/queue"] = sender
+    def sql_to_graph(
+        sender: Callable, path: str, _global_state: GlobalState = None
+    ) -> TSD[int, TSB[Stream[Data[datetime]]]]:
+        _global_state[f"sql_execute_adaptor_raw://{path}/queue"] = sender
 
     def run_query(connection: SqlAdaptorConnection, id: int, query: str, queue):
         try:
@@ -218,7 +227,7 @@ def sql_execute_adaptor_raw_impl(path: str, query: TSD[int, TS[str]]) -> TSD[int
             r = connection.read_database(query)
             time_taken = (time.perf_counter_ns() - start) / 1_000_000_000
             logger.info(f"Finished executing query {id} in {time_taken}s")
-            tick = {id: {"status": StreamStatus.OK, "status_msg": "", "timestamp": datetime.now(UTC)}}
+            tick = {id: {"status": StreamStatus.OK, "status_msg": "", "timestamp": utc_now()}}
             queue(tick)
         except Exception as e:
             logger.error(f"Query {id} on {path} failed: {query}")
@@ -233,9 +242,10 @@ def sql_execute_adaptor_raw_impl(path: str, query: TSD[int, TS[str]]) -> TSD[int
         query: TS[str],
         path: str,
         connection: TS[SqlAdaptorConnection],
-        executor: TS[Executor]
+        executor: TS[Executor],
+        _global_state: GlobalState = None,
     ):
-        queue = GlobalState.instance()[f"sql_execute_adaptor_raw://{path}/queue"]
+        queue = _global_state[f"sql_execute_adaptor_raw://{path}/queue"]
         executor.value.submit(run_query, connection=connection.value, id=id.value, query=query.value, queue=queue)
 
     connection = start_sql_adaptor(path=path)
